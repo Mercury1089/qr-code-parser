@@ -14,6 +14,7 @@ import Utils
 import config.ConfigManager as ConfigManager
 import api.RequestHandler as RequestHandler
 import time
+import os
 
 from res.Fonts import TITLE_FONT, NORMAL_FONT, SMALL_FONT, FONT_COLOR
 
@@ -24,11 +25,6 @@ ConfigManager.load_config()
 # ----------------- CONSTANTS -----------------
 
 APP_NAME = "QR Code Parser - Mercury 1089"
-QR_STRING = "TeamNumber, MatchNumber, AlliancePartner1, AlliancePartner2, AllianceColor, Preload, NoShow, FellOver, Leave, Defense, Park, Hang, " \
-    "AUTON, CORAL, L4ScoredCoral, L3ScoredCoral, L2ScoredCoral, L1ScoredCoral, L4MissedCoral, L3MissedCoral, L2MissedCoral, L1MissedCoral, PickedUpCoral, " \
-        "ALGAE, L3RemovedAlgae, L2RemovedAlgae, L3FailedAlgae, L2FailedAlgae, ScoredProcessor, MissedProcessor, ScoredNet, MissedNet, PickedUpAlgae, "\
-    "TELEOP, CORAL, L4ScoredCoral, L3ScoredCoral, L2ScoredCoral, L1ScoredCoral, L4MissedCoral, L3MissedCoral, L2MissedCoral, L1MissedCoral, PickedUpCoral, " \
-        "ALGAE, L3RemovedAlgae, L2RemovedAlgae, L3FailedAlgae, L2FailedAlgae, ScoredProcessor, MissedProcessor, ScoredNet, MissedNet, PickedUpAlgae, ScouterName"
 APP_BG_COLOR = pygame.Color((51,51,51))
 SCREEN_WIDTH = 1280
 SCREEN_HEIGHT = 720
@@ -39,31 +35,41 @@ FPS_CLOCK = pygame.time.Clock()
 surface = pygame.display.set_mode([SCREEN_WIDTH,SCREEN_HEIGHT])
 
 # ----------------- CHOOSING FILE DIRECTORY -----------------
-last_path = ConfigManager.get_config()['last_path']
+last_path = ConfigManager.get_config().get('last_path', "")
 result = tkinter.messagebox.askquestion(title=APP_NAME, message=f'Would you like to use {last_path} again?')
-if result == tkinter.messagebox.YES:
+if result == tkinter.messagebox.YES and os.path.exists(last_path):
     dir = last_path
 else:
     Tk().withdraw() # we don't want a full GUI, so keep the root window from appearing
     # show an "Open" dialog box and return the path to the selected file
     STRAT_FOLDER = "C:\\Users\\Mercury1089\\Desktop\\Strategy\\2025 Reefscape"
-    dir = tkinter.filedialog.askdirectory(initialdir=STRAT_FOLDER, title="Please select the directory that contains eventList, setupList, and qr_strings")
-QR_STRINGS_PATH = Utils.find_files("qrStrings.txt", dir)
+    if not os.path.exists(STRAT_FOLDER):
+        STRAT_FOLDER = os.path.expanduser("~")
+    dir = tkinter.filedialog.askdirectory(initialdir=STRAT_FOLDER, title="Please select the directory to save output files")
 
-# Add paths to config
-if  QR_STRINGS_PATH != None:
-    ConfigManager.set_config('last_path', dir)
-    ConfigManager.set_config("paths", {"qr_strings": QR_STRINGS_PATH})
-else:
-    tkinter.messagebox.askokcancel(title=APP_NAME, message="Please select a directory that contains the necessary files (eventList.csv, setupList.csv, qrStrings.txt).")
+if not dir:
     pygame.quit()
     exit()
+
+QR_STRINGS_PATH = os.path.join(dir, "qrStrings.txt")
+SETUP_LIST_PATH = os.path.join(dir, "setupList.csv")
+EVENT_LIST_PATH = os.path.join(dir, "eventList.csv")
+
+# Add paths to config
+ConfigManager.set_config('last_path', dir)
+ConfigManager.set_config("paths", {
+    "qr_strings": QR_STRINGS_PATH,
+    "setup_list": SETUP_LIST_PATH,
+    "event_list": EVENT_LIST_PATH
+})
+
+Processor.initialize_files()
 
 # ----------------- SCREEN ELEMENTS/SURFACES -----------------
 pygame.display.set_caption(APP_NAME)
 title_surface = TITLE_FONT.render("Mercury 1089 QR Code Parser", True, pygame.Color("white"))
 
-qr_strings_surf = SMALL_FONT.render(f"QR STRINGS: {QR_STRINGS_PATH}", True, FONT_COLOR)
+dir_surf = SMALL_FONT.render(f"OUTPUT DIR: {dir}", True, FONT_COLOR)
 
 # 10 pixel margins between each box (vertically and horizontally)
 BOX_WIDTH = 200
@@ -97,21 +103,13 @@ edit_button = Button("edit", 0.75 * SCREEN_WIDTH - BOX_WIDTH/2,
 
 team_number_boxes = [team_num_r1, team_num_r2, team_num_r3, team_num_b1, team_num_b2, team_num_b3]
 input_boxes = team_number_boxes + [match_num_input_box]
-# Reminder to add edit_button and load_teams_button back, removed it for competition because of bugs
 buttons = [clear_button, edit_button, load_teams_button, get_teams_button, reload_config_button]
 
 focused = True
 first_open = True
 
 # ----------------- VIDEO CAPTURE -----------------
-# 0 Is the built in camera, change to 1 if using webcam
 cap = cv2.VideoCapture(0)
-print(cap.read())
-# Gets fps of your camera
-fps = cap.get(cv2.CAP_PROP_FPS)
-print("fps:", fps)
-# If your camera can achieve 60 fps
-# Else just have this be 1-30 fps
 cap.set(cv2.CAP_PROP_FPS, 60)
 
 # ----------------- "GAME" LOOP -----------------
@@ -120,18 +118,14 @@ last_scan_time = 0
 qr_string = None
 
 def get_teams():
-    event_key = ConfigManager.get_config()["event_key"]
+    event_key = ConfigManager.get_config().get("event_key")
+    if not event_key:
+        return
     event_data = RequestHandler.get_stored_match_data(event_key)
     if event_data is None:
-        stored_event_key = RequestHandler.get_stored_event_key()
-        tkinter.messagebox.showerror(title=APP_NAME, message=f"Event key and event data don't match. \n" \
-                                        f"Config event key: {event_key}.\n" \
-                                        f"Stored event data: {stored_event_key} \n" \
-                                        f"If you have access to the Internet, press the 'Load Teams' button to get data for the desired competition. ")
         return
     teams_in_match = RequestHandler.get_teams_in_match(event_data, match_number, RequestHandler.MatchTypes.QUALIFICATION)
     if teams_in_match is None:
-        tkinter.messagebox.showerror(title=APP_NAME, message="No teams exist for that match.")
         return
     for i in range(len(team_number_boxes)):
         team_number_boxes[i].completed = False
@@ -139,7 +133,6 @@ def get_teams():
             team_number_boxes[i].text = teams_in_match["red"][i]
         else:
             team_number_boxes[i].text = teams_in_match["blue"][i-3]
-    ConfigManager.set_config("event_key", event_key)
 
 def clear_team_number_boxes():
     for box in team_number_boxes:
@@ -147,7 +140,7 @@ def clear_team_number_boxes():
         box.completed = False
 
 def load_teams():
-    event_key = ConfigManager.get_config()["event_key"]
+    event_key = ConfigManager.get_config().get("event_key")
     if event_key is None:
         event_key = tkinter.simpledialog.askstring(title=APP_NAME, prompt="Please enter the event key (including the year)")
     else:
@@ -178,28 +171,27 @@ def load_teams():
 while True:
     surface.fill(APP_BG_COLOR)
 
-    # On first open, if there is a previous string, autofill the ui with information for 
+    # On first open, if there is a previous string, autofill the ui with information for
     # the next logical match (i.e. increment match number by one from last qr string and autofill team numbers)
     if first_open:
         first_open = False
         last_string = Processor.get_last_full_string()
         if last_string != "":
-            match_number = int(Processor.get_match_number(Processor.get_last_full_string())) + 1
-            match_num_input_box.text = str(match_number)
-            get_teams_button.active = True # This will trigger the autofill
+            try:
+                match_number = int(Processor.get_match_number(last_string)) + 1
+                match_num_input_box.text = str(match_number)
+            except:
+                pass
+            get_teams()
 
     frame = np.array([])
     # Get frame from video
     if focused:
         success, frame = cap.read()
-        if not success:
-            break
- 
-    # Process Frame - Detect and decode QR Code from frame
-    decoded_info = decode(frame) if frame.size > 0 else []
-    # print(decoded_info)
 
-    if (len(decoded_info) > 1): # Don't want to scan two QR codes at once
+    decoded_info = decode(frame) if frame is not None and frame.size > 0 else []
+
+    if (len(decoded_info) > 1):
         tkinter.messagebox.showwarning(title=APP_NAME, message="Make sure there isn't more than ONE QR Code on screen at once!")
 
     # If QR code has been scanned, process and write to file, update boxes as needed
@@ -233,21 +225,20 @@ while True:
                     tkinter.messagebox.showerror(title=APP_NAME, message="A QR code has already been submitted with this team number.")
                     duplicate_string = True
                 else:
-                    Processor.write_full_str(QR_STRINGS_PATH, qr_string)
+                    Processor.write_full_str("", qr_string)
                     box.completed = True
-                    # Show last scanned string 
-                    last_string_text = NORMAL_FONT.render(qr_string, True, FONT_COLOR)
+                    last_string_text = NORMAL_FONT.render(qr_string.split('\n')[0][:50] + "...", True, FONT_COLOR)
                 num_in_boxes = True
         if num_in_boxes and not duplicate_string:
             tkinter.messagebox.showinfo(title=APP_NAME, message=f"Successfully scanned code for Team Number {qr_string_team_number}")
         elif not num_in_boxes:
              tkinter.messagebox.showerror(title=APP_NAME, 
-                                          message="Team or match number do not match up to list. Make sure the boxes and QR code have the right information.")
+                                          message=f"Team ({qr_string_team_number}) or match ({qr_string_match_num}) do not match up to current list (Match {match_number}). Make sure the boxes and QR code have the right information.")
 
     # ----------------- CREATING WEBCAM SURFACE -----------------
-             
+
     # Flip image because the frames appeared inverted by default
-    if focused:
+    if focused and frame is not None:
         frame = np.fliplr(frame)
         frame = np.rot90(frame)
 
@@ -265,8 +256,8 @@ while True:
             pygame.quit()
             exit()
         if event.type == pygame.ACTIVEEVENT:
-            if event.state == 2: # means focus changed
-                focused = event.gain # 1 = focus gained, 0 = focus lost
+            if event.state == 2:
+                focused = event.gain
         if event.type == pygame.KEYDOWN:
             # press TAB or ENTER
             if event.key == pygame.K_TAB or event.key == pygame.K_RETURN:
@@ -311,21 +302,17 @@ while True:
                 button.active = False
                 get_teams()
             
-            # RELOAD CONFIG BUTTON - Will overwrite file directory in config stored in memory (file won't be updated with new dir upon close)
-            # If you make changes to the file while the program is running, you must reload config for it to update in memory
             if button.name == "reload_config" and button.active:
                 button.active = False
-                # Yes = True, No = False
                 warning = tkinter.messagebox.askyesno(title=APP_NAME, message=f"Reloading configuration will overwrite the file directory stored in memory. \n" \
                                                + "Press 'Yes' to continue.", icon=tkinter.messagebox.WARNING)
                 if warning:
-                    ConfigManager.load_config() # Loads config from config.yml into memory
+                    ConfigManager.load_config()
         FPS_CLOCK.tick(FPS)
 
     # ----------------- DISPLAY (BLIT) ELEMENTS ON SCREEN -----------------
-    
+
     count_completed = 0
-    # Show each box, count if completed
     for box in team_number_boxes:
         if box.completed:
             count_completed += 1
@@ -335,27 +322,26 @@ while True:
     match_num_input_box.draw(surface)
 
     match_num_text = match_num_input_box.text.strip()
-    num = int(match_num_text) if match_num_text != "" else 0
     if match_num_text != str(match_number):
-        match_number = int(match_num_text) if match_num_text != "" else 0
+        try:
+            match_number = int(match_num_text)
+        except:
+            pass
 
     if count_completed == len(team_number_boxes):
         for box in team_number_boxes:
             box.text = ''
             box.completed = False
-            match_num_input_box.text = str(num + 1)
-            get_teams()
+        match_number += 1
+        match_num_input_box.text = str(match_number)
+        get_teams()
 
-    # Show the webcam capture surface!
     if focused:
         surface.blit(webcam_surf, (20 , SCREEN_HEIGHT / 2 - webcam_surf.get_height() / 2))
-    # Show title and instructions
     surface.blit(title_surface, (SCREEN_WIDTH / 2 - title_surface.get_width() / 2, 20))
     surface.blit(match_num_text_surf, (match_num_input_box.rect.x - match_num_text_surf.get_width(), match_num_input_box.rect.y + match_num_input_box.rect.height/2))
     surface.blit(box_instructions_surf, (team_num_r1.rect.x, team_num_r1.rect.y - box_instructions_surf.get_height()-10))
-    # Display file paths in bottom left
-    surface.blit(qr_strings_surf, (20, SCREEN_HEIGHT - 1 * qr_strings_surf.get_height() - 10))
-    # Display box for editing the last scanned qr string
+    surface.blit(dir_surf, (20, SCREEN_HEIGHT - 1 * dir_surf.get_height() - 10))
     surface.blit(last_string_text, (0.5 * SCREEN_WIDTH - last_string_text.get_width()/2, 0.85 * SCREEN_HEIGHT + 10))
     # Show buttons
     for button in buttons:
