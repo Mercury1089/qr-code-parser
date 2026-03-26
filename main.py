@@ -52,8 +52,8 @@ if not dir:
     exit()
 
 QR_STRINGS_PATH = os.path.join(dir, "qrStrings.txt")
-SETUP_LIST_PATH = os.path.join(dir, "setupList.csv")
-EVENT_LIST_PATH = os.path.join(dir, "eventList.csv")
+SETUP_LIST_PATH = os.path.join(dir, "setupList.txt")
+EVENT_LIST_PATH = os.path.join(dir, "eventList.txt")
 
 # Add paths to config
 ConfigManager.set_config('last_path', dir)
